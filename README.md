@@ -37,7 +37,7 @@ This calculator is based purely on our table rules.
 
 ## Usage
 
-1. Open the GitHub Pages link.
+1. Open the github pages link. (https://hkgdvs.github.io/NiuNiuCalculator/)
 2. Add to Home Screen (Safari → Share → Add to Home Screen).
 3. Works offline after first load.
 
