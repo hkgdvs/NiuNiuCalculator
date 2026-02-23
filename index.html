@@ -127,7 +127,7 @@
     navigator.serviceWorker.register('./sw.js').catch(()=>{});
   }
 
-  // 14 options (A♠ moved behind K)
+  // 14 options (A♠ behind K)
   const OPTIONS = [
     { id:'A',  label:'A',  rankGroup:'A' },
     ...Array.from({length:9}, (_,i)=>({ id:String(i+2), label:String(i+2), rankGroup:String(i+2) })),
@@ -143,12 +143,12 @@
 
   function isFaceJQK(id){ return id === 'J' || id === 'Q' || id === 'K'; }
 
-  // Rule: 五张鬼 if all 5 are J/Q/K
+  // 五张鬼: all 5 cards are J/Q/K
   function isFiveGhost(cards5){
     return cards5.length === 5 && cards5.every(isFaceJQK);
   }
 
-  // Possible numeric values (3/6 flexible)
+  // possible numeric values (3/6 flexible)
   function possibleValues(cardId){
     if (cardId === 'AS') return [1];
     if (cardId === 'A')  return [1];
@@ -196,100 +196,76 @@
     return { ok:false };
   }
 
-  // Priority tier (lower is better):
-  // 1 DongGu, 2 FiveGhost, 3 Pair, 4 NiuNiu(10), 5 NiuX(1-9)
-  function tierOf(candidate){
-    if (candidate.isDongGu) return 1;
-    if (candidate.isFiveGhost) return 2;
-    if (candidate.isPair) return 3;
-    if (candidate.points === 10) return 4;
+  // Tier priority (lower is better):
+  // 1 牛冬菇, 2 五张鬼, 3 Pair, 4 牛牛(10), 5 牛1-9
+  function tierOfCandidate(c){
+    if (c.isDongGu) return 1;
+    if (c.isFiveGhost) return 2;
+    if (c.isPair) return 3;
+    if (c.points === 10) return 4;
     return 5;
   }
 
-  // Evaluate best split across ALL valid 牛 combinations
+  // Evaluate ALL valid 牛 splits and choose best by tier first, then points
   function evaluate(cards5){
-// Priority tier (lower is better):
-// 1 牛冬菇, 2 五张鬼, 3 Pair, 4 牛牛(10), 5 牛1-9
-function tierOfCandidate(c) {
-  if (c.isDongGu) return 1;
-  if (c.isFiveGhost) return 2;
-  if (c.isPair) return 3;
-  if (c.points === 10) return 4;
-  return 5;
-}
+    if (isFiveGhost(cards5)){
+      return { isFiveGhost: true, tier: 2 };
+    }
 
-function evaluate(cards5){
-  // 五张鬼 override
-  if (isFiveGhost(cards5)){
-    return { isFiveGhost: true, tier: 2 };
-  }
+    const idx = [0,1,2,3,4];
+    let best = null;
 
-  const idx = [0,1,2,3,4];
-  let best = null;
+    for (let i=0;i<5;i++){
+      for (let j=i+1;j<5;j++){
+        for (let k=j+1;k<5;k++){
+          const tripleIdx = [i,j,k];
+          const tripleCards = [cards5[i], cards5[j], cards5[k]];
+          const tripleCheck = canMakeMultipleOf10(tripleCards);
+          if (!tripleCheck.ok) continue;
 
-  for (let i=0;i<5;i++){
-    for (let j=i+1;j<5;j++){
-      for (let k=j+1;k<5;k++){
-        const tripleIdx = [i,j,k];
-        const tripleCards = [cards5[i], cards5[j], cards5[k]];
-        const tripleCheck = canMakeMultipleOf10(tripleCards);
-        if (!tripleCheck.ok) continue;
+          const restIdx = idx.filter(x => !tripleIdx.includes(x));
+          const leftA = cards5[restIdx[0]];
+          const leftB = cards5[restIdx[1]];
+          const leftBest = bestLeftoverScore(leftA, leftB);
 
-        const restIdx = idx.filter(x => !tripleIdx.includes(x));
-        const leftA = cards5[restIdx[0]];
-        const leftB = cards5[restIdx[1]];
+          const isDongGu =
+            (leftA === 'AS' && isFaceJQK(leftB)) ||
+            (leftB === 'AS' && isFaceJQK(leftA));
 
-        const leftBest = bestLeftoverScore(leftA, leftB);
+          const isPair = rankGroupOf(leftA) === rankGroupOf(leftB);
 
-        const isDongGu =
-          (leftA === 'AS' && isFaceJQK(leftB)) ||
-          (leftB === 'AS' && isFaceJQK(leftA));
+          const candidate = {
+            isFiveGhost: false,
+            isDongGu,
+            isPair,
+            points: leftBest.score,
 
-        const isPair = rankGroupOf(leftA) === rankGroupOf(leftB);
+            tripleIdx,
+            tripleUsedValues: tripleCheck.used,
+            tripleSum: tripleCheck.sum,
 
-        const candidate = {
-          isFiveGhost: false,
-          isDongGu,
-          isPair,
-          points: leftBest.score,
+            leftA, leftB,
+            leftUsedA: leftBest.usedA,
+            leftUsedB: leftBest.usedB,
+            leftSum: leftBest.sum,
+          };
 
-          tripleIdx,
-          tripleUsedValues: tripleCheck.used,
-          tripleSum: tripleCheck.sum,
+          candidate.tier = tierOfCandidate(candidate);
 
-          leftA, leftB,
-          leftUsedA: leftBest.usedA,
-          leftUsedB: leftBest.usedB,
-          leftSum: leftBest.sum
-        };
+          if (!best){ best = candidate; continue; }
 
-        candidate.tier = tierOfCandidate(candidate);
+          // Tier first
+          if (candidate.tier < best.tier) { best = candidate; continue; }
+          if (candidate.tier > best.tier) continue;
 
-        if (!best) {
-          best = candidate;
-          continue;
+          // Same tier: higher points
+          if (candidate.points > best.points) { best = candidate; continue; }
         }
-
-        // ✅ 1) Compare by tier FIRST (this fixes your 2+2+10+6+7 case)
-        if (candidate.tier < best.tier) {
-          best = candidate;
-          continue;
-        }
-        if (candidate.tier > best.tier) continue;
-
-        // ✅ 2) Same tier -> compare points (only meaningful for 牛X tier)
-        if (candidate.points > best.points) {
-          best = candidate;
-          continue;
-        }
-
-        // ✅ 3) (Optional) Same tier & points -> keep first (stable)
       }
     }
-  }
 
-  return best; // null => 无牛
-}
+    return best; // null => 无牛
+  }
 
   // --- UI State (duplicates allowed) ---
   let selected = [];
@@ -312,8 +288,8 @@ function evaluate(cards5){
 
   function removeOne(id){
     document.getElementById('result').innerHTML = '';
-    const idx = selected.indexOf(id);
-    if (idx >= 0) selected.splice(idx, 1);
+    const ix = selected.indexOf(id);
+    if (ix >= 0) selected.splice(ix, 1);
     render();
   }
 
@@ -379,7 +355,7 @@ function evaluate(cards5){
       resultEl.innerHTML = `
         <div class="bad"><b>Result:</b> 无牛</div>
         <div style="margin-top:6px;">
-          <span class="tag">😟 无牛...</span>
+          <span class="tag">无牛... 😟</span>
         </div>
       `;
       return;
@@ -412,7 +388,7 @@ function evaluate(cards5){
     const tags = [];
     if (best.isDongGu) tags.push(`<span class="tag">🥳 牛冬菇!!!!!</span>`);
     if (best.isPair) tags.push(`<span class="tag">🂡🂡 Pair Cards!!!</span>`);
-    if (!best.isDongGu && !best.isPair && best.points === 10) tags.push(`<span class="tag">🐮 牛牛!! (10)</span>`);
+    if (!best.isDongGu && !best.isPair && best.points === 10) tags.push(`<span class="tag">牛牛!! (10)</span>`);
 
     const tripleExplain = best.tripleIdx.map((ix, t) => {
       const cid = selected[ix];
