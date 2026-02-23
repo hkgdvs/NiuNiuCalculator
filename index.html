@@ -208,72 +208,88 @@
 
   // Evaluate best split across ALL valid 牛 combinations
   function evaluate(cards5){
-    // Five Ghost overrides everything
-    if (isFiveGhost(cards5)){
-      return {
-        isFiveGhost: true,
-        tier: 2
-      };
-    }
+// Priority tier (lower is better):
+// 1 牛冬菇, 2 五张鬼, 3 Pair, 4 牛牛(10), 5 牛1-9
+function tierOfCandidate(c) {
+  if (c.isDongGu) return 1;
+  if (c.isFiveGhost) return 2;
+  if (c.isPair) return 3;
+  if (c.points === 10) return 4;
+  return 5;
+}
 
-    const idx = [0,1,2,3,4];
-    let best = null;
+function evaluate(cards5){
+  // 五张鬼 override
+  if (isFiveGhost(cards5)){
+    return { isFiveGhost: true, tier: 2 };
+  }
 
-    for (let i=0;i<5;i++){
-      for (let j=i+1;j<5;j++){
-        for (let k=j+1;k<5;k++){
-          const tripleIdx = [i,j,k];
-          const tripleCards = [cards5[i], cards5[j], cards5[k]];
-          const tripleCheck = canMakeMultipleOf10(tripleCards);
-          if (!tripleCheck.ok) continue;
+  const idx = [0,1,2,3,4];
+  let best = null;
 
-          const restIdx = idx.filter(x => !tripleIdx.includes(x));
-          const leftA = cards5[restIdx[0]];
-          const leftB = cards5[restIdx[1]];
-          const leftBest = bestLeftoverScore(leftA, leftB);
+  for (let i=0;i<5;i++){
+    for (let j=i+1;j<5;j++){
+      for (let k=j+1;k<5;k++){
+        const tripleIdx = [i,j,k];
+        const tripleCards = [cards5[i], cards5[j], cards5[k]];
+        const tripleCheck = canMakeMultipleOf10(tripleCards);
+        if (!tripleCheck.ok) continue;
 
-          // DongGu: A♠ + J/Q/K in 点数
-          const isDongGu =
-            (leftA === 'AS' && isFaceJQK(leftB)) ||
-            (leftB === 'AS' && isFaceJQK(leftA));
+        const restIdx = idx.filter(x => !tripleIdx.includes(x));
+        const leftA = cards5[restIdx[0]];
+        const leftB = cards5[restIdx[1]];
 
-          // Pair: same rank group (A♠ + A => Pair A)
-          const isPair = rankGroupOf(leftA) === rankGroupOf(leftB);
+        const leftBest = bestLeftoverScore(leftA, leftB);
 
-          const candidate = {
-            isFiveGhost: false,
-            isDongGu,
-            isPair,
-            points: leftBest.score,
+        const isDongGu =
+          (leftA === 'AS' && isFaceJQK(leftB)) ||
+          (leftB === 'AS' && isFaceJQK(leftA));
 
-            tripleIdx,
-            tripleUsedValues: tripleCheck.used,
-            tripleSum: tripleCheck.sum,
+        const isPair = rankGroupOf(leftA) === rankGroupOf(leftB);
 
-            leftA, leftB,
-            leftUsedA: leftBest.usedA,
-            leftUsedB: leftBest.usedB,
-            leftSum: leftBest.sum,
-          };
+        const candidate = {
+          isFiveGhost: false,
+          isDongGu,
+          isPair,
+          points: leftBest.score,
 
-          candidate.tier = tierOf(candidate);
+          tripleIdx,
+          tripleUsedValues: tripleCheck.used,
+          tripleSum: tripleCheck.sum,
 
-          if (!best) { best = candidate; continue; }
+          leftA, leftB,
+          leftUsedA: leftBest.usedA,
+          leftUsedB: leftBest.usedB,
+          leftSum: leftBest.sum
+        };
 
-          // 1) Tier priority first
-          if (candidate.tier < best.tier) { best = candidate; continue; }
-          if (candidate.tier > best.tier) continue;
+        candidate.tier = tierOfCandidate(candidate);
 
-          // 2) Same tier -> compare points (for 牛X tier)
-          if (candidate.points > best.points) { best = candidate; continue; }
-
-          // 3) If still tie, keep the first found (stable)
+        if (!best) {
+          best = candidate;
+          continue;
         }
+
+        // ✅ 1) Compare by tier FIRST (this fixes your 2+2+10+6+7 case)
+        if (candidate.tier < best.tier) {
+          best = candidate;
+          continue;
+        }
+        if (candidate.tier > best.tier) continue;
+
+        // ✅ 2) Same tier -> compare points (only meaningful for 牛X tier)
+        if (candidate.points > best.points) {
+          best = candidate;
+          continue;
+        }
+
+        // ✅ 3) (Optional) Same tier & points -> keep first (stable)
       }
     }
-
-    return best; // null => 无牛
   }
+
+  return best; // null => 无牛
+}
 
   // --- UI State (duplicates allowed) ---
   let selected = [];
@@ -363,7 +379,7 @@
       resultEl.innerHTML = `
         <div class="bad"><b>Result:</b> 无牛</div>
         <div style="margin-top:6px;">
-          <span class="tag">无牛... 😟</span>
+          <span class="tag">😟 无牛...</span>
         </div>
       `;
       return;
@@ -396,7 +412,7 @@
     const tags = [];
     if (best.isDongGu) tags.push(`<span class="tag">🥳 牛冬菇!!!!!</span>`);
     if (best.isPair) tags.push(`<span class="tag">🂡🂡 Pair Cards!!!</span>`);
-    if (!best.isDongGu && !best.isPair && best.points === 10) tags.push(`<span class="tag">牛牛!! (10)</span>`);
+    if (!best.isDongGu && !best.isPair && best.points === 10) tags.push(`<span class="tag">🐮 牛牛!! (10)</span>`);
 
     const tripleExplain = best.tripleIdx.map((ix, t) => {
       const cid = selected[ix];
