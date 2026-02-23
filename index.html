@@ -141,12 +141,12 @@
 
   // --- 14 Card options (not a deck, just rank buttons) ---
   const OPTIONS = [
-    { id:'AS', label:'A♠', rankGroup:'A' },
     { id:'A',  label:'A',  rankGroup:'A' },
     ...Array.from({length:9}, (_,i)=>({ id:String(i+2), label:String(i+2), rankGroup:String(i+2) })),
     { id:'J', label:'J', rankGroup:'J' },
     { id:'Q', label:'Q', rankGroup:'Q' },
     { id:'K', label:'K', rankGroup:'K' },
+    { id:'AS', label:'A♠', rankGroup:'A' },
   ];
 
   function findOpt(id){ return OPTIONS.find(o=>o.id===id); }
