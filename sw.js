@@ -1,4 +1,4 @@
-const CACHE = 'niu-app-v6';
+const CACHE = 'niu-app-v7';
 const ASSETS = ['./', './index.html', './manifest.webmanifest'];
 
 self.addEventListener('install', (event) => {
