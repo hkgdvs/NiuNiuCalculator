@@ -1,4 +1,4 @@
-# 🐮 牛 Calculator (Just for Fun!)
+# 🐮 NiuNiu Calculator
 
 I made this small offline web app to quickly calculate 牛 points during the game.
 
