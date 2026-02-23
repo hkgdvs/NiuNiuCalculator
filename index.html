@@ -2,13 +2,23 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <!-- Prevent zooming (pinch/double-tap) -->
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
   <title>Niu Niu</title>
 
   <link rel="manifest" href="manifest.webmanifest">
   <meta name="theme-color" content="#111111"/>
 
   <style>
+    /* Prevent iOS double-tap zoom while keeping taps responsive */
+    html, body {
+      touch-action: manipulation;
+      -webkit-text-size-adjust: 100%;
+    }
+    button, .card, .action {
+      touch-action: manipulation;
+    }
+
     body { font-family: -apple-system, system-ui, Arial; margin: 18px; }
     h2 { margin: 0 0 10px; }
     .box { border:1px solid #ddd; border-radius:16px; padding:14px; margin-top:12px; }
@@ -127,6 +137,16 @@
     navigator.serviceWorker.register('./sw.js').catch(()=>{});
   }
 
+  // Prevent iOS double-tap zoom (still allows fast repeated taps)
+  let lastTouchEnd = 0;
+  document.addEventListener('touchend', function (event) {
+    const now = Date.now();
+    if (now - lastTouchEnd <= 300) {
+      event.preventDefault();
+    }
+    lastTouchEnd = now;
+  }, { passive: false });
+
   // 14 options (A♠ behind K)
   const OPTIONS = [
     { id:'A',  label:'A',  rankGroup:'A' },
@@ -228,10 +248,12 @@
           const leftB = cards5[restIdx[1]];
           const leftBest = bestLeftoverScore(leftA, leftB);
 
+          // 牛冬菇: A♠ + J/Q/K in 点数
           const isDongGu =
             (leftA === 'AS' && isFaceJQK(leftB)) ||
             (leftB === 'AS' && isFaceJQK(leftA));
 
+          // Pair: same rank group (A♠ + A => Pair A)
           const isPair = rankGroupOf(leftA) === rankGroupOf(leftB);
 
           const candidate = {
@@ -247,7 +269,7 @@
             leftA, leftB,
             leftUsedA: leftBest.usedA,
             leftUsedB: leftBest.usedB,
-            leftSum: leftBest.sum,
+            leftSum: leftBest.sum
           };
 
           candidate.tier = tierOfCandidate(candidate);
@@ -372,7 +394,7 @@
       return;
     }
 
-    // Result label by priority
+    // Result label
     let resultLabel = '';
     if (best.isDongGu) {
       resultLabel = '牛冬菇';
