@@ -1,0 +1,483 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>牛 Calculator — Offline</title>
+
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#111111"/>
+
+  <style>
+    body { font-family: -apple-system, system-ui, Arial; margin: 18px; }
+    h2 { margin: 0 0 10px; }
+    .box { border:1px solid #ddd; border-radius:16px; padding:14px; margin-top:12px; }
+    .muted { color:#555; font-size: 14px; line-height: 1.4; }
+    .good { color:#0a7a2f; }
+    .bad { color:#b00020; }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(70px, 1fr));
+      gap: 10px;
+      margin-top: 10px;
+    }
+
+    button.card {
+      position: relative;
+      padding: 12px 10px;
+      font-size: 18px;
+      border-radius: 14px;
+      border: 1px solid #ccc;
+      background: #fff;
+      cursor: pointer;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+    button.card:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
+    .badge {
+      position:absolute;
+      top: -8px;
+      right: -8px;
+      min-width: 24px;
+      height: 24px;
+      padding: 0 6px;
+      border-radius: 999px;
+      border: 1px solid #111;
+      background:#111;
+      color:#fff;
+      font-size: 13px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+    }
+
+    .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:10px; }
+
+    button.action {
+      padding: 12px 14px;
+      font-size: 16px;
+      border-radius: 14px;
+      border: 1px solid #ccc;
+      background: #f7f7f7;
+      cursor: pointer;
+    }
+    button.action.primary {
+      background: #111;
+      color: white;
+      border-color: #111;
+    }
+    button.action:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .selectedBar {
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+      margin-top:10px;
+    }
+    .pill {
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      padding:8px 10px;
+      border-radius:999px;
+      border:1px solid #ddd;
+      background:#fafafa;
+      font-size: 14px;
+    }
+    .pill button {
+      border:1px solid #ccc;
+      background:#fff;
+      border-radius:999px;
+      padding:4px 8px;
+      cursor:pointer;
+      font-size: 14px;
+      line-height: 1;
+    }
+
+    .tag { display:inline-block; padding:6px 10px; border-radius:999px; border:1px solid #ddd; margin:6px 6px 0 0; }
+    code { background:#f3f3f3; padding:2px 6px; border-radius:6px; }
+  </style>
+</head>
+<body>
+  <h2>牛 (Niu) Points Calculator</h2>
+
+  <div class="box">
+    <div><b>Tap to add cards</b> <span class="muted" id="countHint">(0 / 5)</span></div>
+
+    <div class="grid" id="cardGrid"></div>
+
+    <div class="selectedBar" id="selectedBar"></div>
+
+    <div class="row">
+      <button class="action primary" id="calcBtn" onclick="calculate()" disabled>Calculate</button>
+      <button class="action" onclick="removeLast()">Undo</button>
+      <button class="action" onclick="resetAll()">Reset</button>
+    </div>
+
+    <div class="muted" style="margin-top:10px;">
+      14 options: <code>A♠</code>, <code>A</code>, <code>2..10</code>, <code>J</code>, <code>Q</code>, <code>K</code><br>
+      You can tap the same card multiple times (for repeated cards).<br>
+      Rule: Need any 3 cards = multiple of 10 (3/6 flexible). Otherwise = 0 points.
+    </div>
+  </div>
+
+  <div class="box">
+    <div id="result"></div>
+  </div>
+
+<script>
+  // Offline support
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('./sw.js').catch(()=>{});
+  }
+
+  // --- 14 Card options (not a deck, just rank buttons) ---
+  const OPTIONS = [
+    { id:'AS', label:'A♠', rankGroup:'A' },
+    { id:'A',  label:'A',  rankGroup:'A' },
+    ...Array.from({length:9}, (_,i)=>({ id:String(i+2), label:String(i+2), rankGroup:String(i+2) })),
+    { id:'J', label:'J', rankGroup:'J' },
+    { id:'Q', label:'Q', rankGroup:'Q' },
+    { id:'K', label:'K', rankGroup:'K' },
+  ];
+
+  function findOpt(id){ return OPTIONS.find(o=>o.id===id); }
+  function labelOf(id){ return findOpt(id)?.label ?? id; }
+  function rankGroupOf(id){ return findOpt(id)?.rankGroup ?? id; }
+
+  function isFaceJQK(id){ return id === 'J' || id === 'Q' || id === 'K'; }
+  function isTenPointCard(id){ return id === '10' || isFaceJQK(id); }
+
+  // Rule 6: 五张鬼 (all 5 cards are J/Q/K)
+  function isFiveGhost(cards5){
+    return cards5.length === 5 && cards5.every(isFaceJQK);
+  }
+
+  // point / flexibility
+  function possibleValues(cardId){
+    if (cardId === 'AS') return [1];
+    if (cardId === 'A')  return [1];
+    if (cardId === 'J' || cardId === 'Q' || cardId === 'K') return [10];
+    if (cardId === '10') return [10];
+    if (cardId === '3' || cardId === '6') return [3,6]; // special rule
+    return [parseInt(cardId,10)];
+  }
+
+  // score from leftover 2 cards: last digit, but 0 means 10
+  function scoreFromSum(sum){
+    const mod = sum % 10;
+    return (mod === 0) ? 10 : mod;
+  }
+
+  // brute-force best assignment for leftover 2 cards
+  function bestLeftoverScore(cardA, cardB){
+    const va = possibleValues(cardA);
+    const vb = possibleValues(cardB);
+    let best = { score: -1, sum: null, usedA: null, usedB: null };
+
+    for (const a of va){
+      for (const b of vb){
+        const sum = a + b;
+        const score = scoreFromSum(sum);
+        if (score > best.score){
+          best = { score, sum, usedA: a, usedB: b };
+        }
+      }
+    }
+    return best;
+  }
+
+  // check if any assignment for 3 cards can be multiple of 10
+  function canMakeMultipleOf10(cards3){
+    const vals = cards3.map(possibleValues);
+    for (const a of vals[0]){
+      for (const b of vals[1]){
+        for (const c of vals[2]){
+          const sum = a+b+c;
+          if (sum % 10 === 0) return { ok:true, sum, used:[a,b,c] };
+        }
+      }
+    }
+    return { ok:false };
+  }
+
+  // choose best valid 3-card set + best leftover points
+  function evaluate(cards5){
+    // Rule 6 override
+    if (isFiveGhost(cards5)){
+      return { special: 'FIVE_GHOST' };
+    }
+
+    const idx = [0,1,2,3,4];
+    const tenPointCount = cards5.filter(isTenPointCard).length;
+    const preferAlloc = tenPointCount >= 3; // Rule #5
+
+    let best = null;
+
+    for (let i=0;i<5;i++){
+      for (let j=i+1;j<5;j++){
+        for (let k=j+1;k<5;k++){
+          const tripleIdx = [i,j,k];
+          const tripleCards = [cards5[i], cards5[j], cards5[k]];
+          const tripleCheck = canMakeMultipleOf10(tripleCards);
+          if (!tripleCheck.ok) continue;
+
+          const restIdx = idx.filter(x => !tripleIdx.includes(x));
+          const leftA = cards5[restIdx[0]];
+          const leftB = cards5[restIdx[1]];
+          const leftBest = bestLeftoverScore(leftA, leftB);
+
+          // Rule 4: 牛冬菇 = A♠ + (J/Q/K)
+          const hasDongGu =
+            (leftA === 'AS' && isFaceJQK(leftB)) ||
+            (leftB === 'AS' && isFaceJQK(leftA));
+
+          // Rule 3: Pair X (A♠ + A counts as Pair A)
+          const isPair = rankGroupOf(leftA) === rankGroupOf(leftB);
+
+          // Rule #5 tie-break metrics
+          const leftoverJQKCount = (isFaceJQK(leftA)?1:0) + (isFaceJQK(leftB)?1:0);
+          const leftover10Count  = ((leftA==='10')?1:0) + ((leftB==='10')?1:0);
+          const triple10Count    = tripleCards.filter(c => c === '10').length;
+          const tripleJQKCount   = tripleCards.filter(isFaceJQK).length;
+
+          const candidate = {
+            points: leftBest.score,
+
+            tripleIdx,
+            tripleUsedValues: tripleCheck.used,
+            tripleSum: tripleCheck.sum,
+
+            leftA, leftB,
+            leftUsedA: leftBest.usedA,
+            leftUsedB: leftBest.usedB,
+            leftSum: leftBest.sum,
+
+            hasDongGu,
+            isPair,
+
+            preferAlloc,
+            leftoverJQKCount,
+            leftover10Count,
+            triple10Count,
+            tripleJQKCount
+          };
+
+          if (!best) { best = candidate; continue; }
+
+          // 1) maximize points
+          if (candidate.points > best.points) { best = candidate; continue; }
+          if (candidate.points < best.points) continue;
+
+          // 2) special strength: DongGu > Pair (when tie)
+          const candSpecial = (candidate.hasDongGu ? 3 : 0) + (candidate.isPair ? 1 : 0);
+          const bestSpecial = (best.hasDongGu ? 3 : 0) + (best.isPair ? 1 : 0);
+          if (candSpecial > bestSpecial) { best = candidate; continue; }
+          if (candSpecial < bestSpecial) continue;
+
+          // 3) Rule #5: if you have >=3 ten-point cards, prefer J/Q/K in 点数 and 10 in 牛
+          if (candidate.preferAlloc) {
+            if (candidate.leftoverJQKCount > best.leftoverJQKCount) { best = candidate; continue; }
+            if (candidate.leftoverJQKCount < best.leftoverJQKCount) continue;
+
+            if (candidate.leftover10Count < best.leftover10Count) { best = candidate; continue; }
+            if (candidate.leftover10Count > best.leftover10Count) continue;
+
+            if (candidate.triple10Count > best.triple10Count) { best = candidate; continue; }
+            if (candidate.triple10Count < best.triple10Count) continue;
+
+            if (candidate.tripleJQKCount < best.tripleJQKCount) { best = candidate; continue; }
+            if (candidate.tripleJQKCount > best.tripleJQKCount) continue;
+          }
+        }
+      }
+    }
+
+    return best; // null = 无牛
+  }
+
+  // --- UI State: allow duplicates ---
+  let selected = []; // array of ids, can repeat, max length 5
+
+  function counts(){
+    const m = new Map();
+    for (const id of selected) m.set(id, (m.get(id)||0)+1);
+    return m;
+  }
+
+  function addCard(id){
+    document.getElementById('result').innerHTML = '';
+    if (selected.length >= 5) return;
+    selected.push(id);
+    render();
+  }
+
+  function removeOne(id){
+    document.getElementById('result').innerHTML = '';
+    const idx = selected.indexOf(id);
+    if (idx >= 0) selected.splice(idx, 1);
+    render();
+  }
+
+  function removeLast(){
+    document.getElementById('result').innerHTML = '';
+    selected.pop();
+    render();
+  }
+
+  function resetAll(){
+    selected = [];
+    document.getElementById('result').innerHTML = '';
+    render();
+  }
+
+  function render(){
+    document.getElementById('countHint').textContent = `(${selected.length} / 5)`;
+    document.getElementById('calcBtn').disabled = (selected.length !== 5);
+
+    const disableAdds = selected.length >= 5;
+
+    const c = counts();
+    for (const opt of OPTIONS){
+      const btn = document.getElementById('btn_'+opt.id);
+      btn.disabled = disableAdds;
+
+      const badge = document.getElementById('badge_'+opt.id);
+      const n = c.get(opt.id) || 0;
+      if (n > 0){
+        badge.textContent = n;
+        badge.style.display = 'flex';
+      } else {
+        badge.style.display = 'none';
+      }
+    }
+
+    const bar = document.getElementById('selectedBar');
+    bar.innerHTML = '';
+    if (selected.length === 0){
+      bar.innerHTML = `<span class="muted">Selected: none</span>`;
+      return;
+    }
+
+    for (const opt of OPTIONS){
+      const n = c.get(opt.id) || 0;
+      if (n <= 0) continue;
+
+      const pill = document.createElement('span');
+      pill.className = 'pill';
+      pill.innerHTML = `<b>${opt.label}</b> × ${n}`;
+
+      const minus = document.createElement('button');
+      minus.textContent = '➖';
+      minus.title = 'Remove one';
+      minus.addEventListener('click', () => removeOne(opt.id));
+
+      pill.appendChild(minus);
+      bar.appendChild(pill);
+    }
+  }
+
+  function calculate(){
+    if (selected.length !== 5) return;
+
+    const best = evaluate(selected);
+    const resultEl = document.getElementById('result');
+
+    // Rule 6: 五张鬼
+    if (best && best.special === 'FIVE_GHOST'){
+      resultEl.innerHTML = `
+        <div class="good"><b>Result:</b> 五张鬼</div>
+        <div class="muted" style="margin-top:6px;">All 5 cards are J/Q/K.</div>
+      `;
+      return;
+    }
+
+    // 无牛
+    if (!best){
+      resultEl.innerHTML = `
+        <div class="bad"><b>Result:</b> 0 points (无牛)</div>
+        <div class="muted" style="margin-top:6px;">
+          No 3-card combination can form a multiple of 10 (after applying 3/6 flexibility).
+        </div>
+      `;
+      return;
+    }
+
+    // Result label rules (priority)
+    let resultLabel = '';
+    if (best.hasDongGu) {
+      resultLabel = '牛冬菇';
+    } else if (best.isPair) {
+      const rg = rankGroupOf(best.leftA); // same as leftB
+      resultLabel = `Pair ${rg}`;
+    } else {
+      if (best.points === 10) resultLabel = '牛牛 (10)';
+      else resultLabel = `牛 ${best.points}`;
+    }
+
+    const tags = [];
+    if (best.hasDongGu) tags.push(`<span class="tag">🎉 牛冬菇!!!!! (A♠ + J/Q/K)</span>`);
+    if (best.isPair) tags.push(`<span class="tag">🂡🂡 Pair cards!!!</span>`);
+
+    const tripleExplain = best.tripleIdx.map((ix, t) => {
+      const cid = selected[ix];
+      return `${labelOf(cid)}→${best.tripleUsedValues[t]}`;
+    }).join(' + ');
+
+    const la = labelOf(best.leftA);
+    const lb = labelOf(best.leftB);
+
+    resultEl.innerHTML = `
+      <div class="good"><b>Result:</b> ${resultLabel}</div>
+      <div style="margin-top:6px;">${tags.join(' ')}</div>
+
+      <div style="margin-top:10px;">
+        <b>牛 (multiple of 10):</b><br>
+        ${tripleExplain} = <b>${best.tripleSum}</b>
+      </div>
+
+      <div style="margin-top:10px;">
+        <b>点数:</b><br>
+        ${la}→${best.leftUsedA} + ${lb}→${best.leftUsedB}
+        = <b>${best.leftSum}</b> → 点数 = <b>${best.points}</b>
+      </div>
+
+      <div class="muted" style="margin-top:10px;">
+        3 & 6 can be treated as 3 or 6; calculator chooses the highest 点数 automatically.
+        ${best.preferAlloc ? '<br>Rule applied: When you have ≥3 ten-point cards, J/Q/K are preferred in 点数 and 10 is preferred in 牛.' : ''}
+      </div>
+    `;
+  }
+
+  function init(){
+    const grid = document.getElementById('cardGrid');
+    for (const opt of OPTIONS){
+      const btn = document.createElement('button');
+      btn.className = 'card';
+      btn.id = 'btn_' + opt.id;
+      btn.textContent = opt.label;
+      btn.addEventListener('click', () => addCard(opt.id));
+
+      const badge = document.createElement('div');
+      badge.className = 'badge';
+      badge.id = 'badge_' + opt.id;
+      badge.style.display = 'none';
+      btn.appendChild(badge);
+
+      grid.appendChild(btn);
+    }
+    render();
+  }
+
+  init();
+</script>
+</body>
+</html>
