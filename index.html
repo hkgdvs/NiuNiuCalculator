@@ -66,15 +66,6 @@
       background: #f7f7f7;
       cursor: pointer;
     }
-    button.action.primary {
-      background: #111;
-      color: white;
-      border-color: #111;
-    }
-    button.action:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
 
     .selectedBar {
       display:flex;
@@ -106,6 +97,7 @@
     code { background:#f3f3f3; padding:2px 6px; border-radius:6px; }
   </style>
 </head>
+
 <body>
   <h2>Niu Niu Calculator</h2>
 
@@ -135,7 +127,7 @@
     navigator.serviceWorker.register('./sw.js').catch(()=>{});
   }
 
-  // --- 14 Card options (not a deck, just rank buttons) ---
+  // 14 options (A♠ moved behind K)
   const OPTIONS = [
     { id:'A',  label:'A',  rankGroup:'A' },
     ...Array.from({length:9}, (_,i)=>({ id:String(i+2), label:String(i+2), rankGroup:String(i+2) })),
@@ -150,30 +142,29 @@
   function rankGroupOf(id){ return findOpt(id)?.rankGroup ?? id; }
 
   function isFaceJQK(id){ return id === 'J' || id === 'Q' || id === 'K'; }
-  function isTenPointCard(id){ return id === '10' || isFaceJQK(id); }
 
-  // Rule 6: 五张鬼 (all 5 cards are J/Q/K)
+  // Rule: 五张鬼 if all 5 are J/Q/K
   function isFiveGhost(cards5){
     return cards5.length === 5 && cards5.every(isFaceJQK);
   }
 
-  // point / flexibility
+  // Possible numeric values (3/6 flexible)
   function possibleValues(cardId){
     if (cardId === 'AS') return [1];
     if (cardId === 'A')  return [1];
-    if (cardId === 'J' || cardId === 'Q' || cardId === 'K') return [10];
+    if (isFaceJQK(cardId)) return [10];
     if (cardId === '10') return [10];
-    if (cardId === '3' || cardId === '6') return [3,6]; // special rule
+    if (cardId === '3' || cardId === '6') return [3,6];
     return [parseInt(cardId,10)];
   }
 
-  // score from leftover 2 cards: last digit, but 0 means 10
+  // last digit, but 0 -> 10
   function scoreFromSum(sum){
     const mod = sum % 10;
     return (mod === 0) ? 10 : mod;
   }
 
-  // brute-force best assignment for leftover 2 cards
+  // best scoring for leftover 2 cards (auto choose best 3/6 assignment)
   function bestLeftoverScore(cardA, cardB){
     const va = possibleValues(cardA);
     const vb = possibleValues(cardB);
@@ -191,7 +182,7 @@
     return best;
   }
 
-  // check if any assignment for 3 cards can be multiple of 10
+  // any assignment for 3 cards can be multiple of 10?
   function canMakeMultipleOf10(cards3){
     const vals = cards3.map(possibleValues);
     for (const a of vals[0]){
@@ -205,17 +196,27 @@
     return { ok:false };
   }
 
-  // choose best valid 3-card set + best leftover points
+  // Priority tier (lower is better):
+  // 1 DongGu, 2 FiveGhost, 3 Pair, 4 NiuNiu(10), 5 NiuX(1-9)
+  function tierOf(candidate){
+    if (candidate.isDongGu) return 1;
+    if (candidate.isFiveGhost) return 2;
+    if (candidate.isPair) return 3;
+    if (candidate.points === 10) return 4;
+    return 5;
+  }
+
+  // Evaluate best split across ALL valid 牛 combinations
   function evaluate(cards5){
-    // Rule 6 override
+    // Five Ghost overrides everything
     if (isFiveGhost(cards5)){
-      return { special: 'FIVE_GHOST' };
+      return {
+        isFiveGhost: true,
+        tier: 2
+      };
     }
 
     const idx = [0,1,2,3,4];
-    const tenPointCount = cards5.filter(isTenPointCard).length;
-    const preferAlloc = tenPointCount >= 3; // Rule #5
-
     let best = null;
 
     for (let i=0;i<5;i++){
@@ -231,21 +232,18 @@
           const leftB = cards5[restIdx[1]];
           const leftBest = bestLeftoverScore(leftA, leftB);
 
-          // Rule 4: 牛冬菇 = A♠ + (J/Q/K)
-          const hasDongGu =
+          // DongGu: A♠ + J/Q/K in 点数
+          const isDongGu =
             (leftA === 'AS' && isFaceJQK(leftB)) ||
             (leftB === 'AS' && isFaceJQK(leftA));
 
-          // Rule 3: Pair X (A♠ + A counts as Pair A)
+          // Pair: same rank group (A♠ + A => Pair A)
           const isPair = rankGroupOf(leftA) === rankGroupOf(leftB);
 
-          // Rule #5 tie-break metrics
-          const leftoverJQKCount = (isFaceJQK(leftA)?1:0) + (isFaceJQK(leftB)?1:0);
-          const leftover10Count  = ((leftA==='10')?1:0) + ((leftB==='10')?1:0);
-          const triple10Count    = tripleCards.filter(c => c === '10').length;
-          const tripleJQKCount   = tripleCards.filter(isFaceJQK).length;
-
           const candidate = {
+            isFiveGhost: false,
+            isDongGu,
+            isPair,
             points: leftBest.score,
 
             tripleIdx,
@@ -256,52 +254,29 @@
             leftUsedA: leftBest.usedA,
             leftUsedB: leftBest.usedB,
             leftSum: leftBest.sum,
-
-            hasDongGu,
-            isPair,
-
-            preferAlloc,
-            leftoverJQKCount,
-            leftover10Count,
-            triple10Count,
-            tripleJQKCount
           };
+
+          candidate.tier = tierOf(candidate);
 
           if (!best) { best = candidate; continue; }
 
-          // 1) maximize points
+          // 1) Tier priority first
+          if (candidate.tier < best.tier) { best = candidate; continue; }
+          if (candidate.tier > best.tier) continue;
+
+          // 2) Same tier -> compare points (for 牛X tier)
           if (candidate.points > best.points) { best = candidate; continue; }
-          if (candidate.points < best.points) continue;
 
-          // 2) special strength: DongGu > Pair (when tie)
-          const candSpecial = (candidate.hasDongGu ? 3 : 0) + (candidate.isPair ? 1 : 0);
-          const bestSpecial = (best.hasDongGu ? 3 : 0) + (best.isPair ? 1 : 0);
-          if (candSpecial > bestSpecial) { best = candidate; continue; }
-          if (candSpecial < bestSpecial) continue;
-
-          // 3) Rule #5: if you have >=3 ten-point cards, prefer J/Q/K in 点数 and 10 in 牛
-          if (candidate.preferAlloc) {
-            if (candidate.leftoverJQKCount > best.leftoverJQKCount) { best = candidate; continue; }
-            if (candidate.leftoverJQKCount < best.leftoverJQKCount) continue;
-
-            if (candidate.leftover10Count < best.leftover10Count) { best = candidate; continue; }
-            if (candidate.leftover10Count > best.leftover10Count) continue;
-
-            if (candidate.triple10Count > best.triple10Count) { best = candidate; continue; }
-            if (candidate.triple10Count < best.triple10Count) continue;
-
-            if (candidate.tripleJQKCount < best.tripleJQKCount) { best = candidate; continue; }
-            if (candidate.tripleJQKCount > best.tripleJQKCount) continue;
-          }
+          // 3) If still tie, keep the first found (stable)
         }
       }
     }
 
-    return best; // null = 无牛
+    return best; // null => 无牛
   }
 
-  // --- UI State: allow duplicates ---
-  let selected = []; // array of ids, can repeat, max length 5
+  // --- UI State (duplicates allowed) ---
+  let selected = [];
 
   function counts(){
     const m = new Map();
@@ -316,22 +291,13 @@
     selected.push(id);
     render();
 
-    // Auto-calculate as soon as we have exactly 5 cards
-    if (selected.length === 5) {
-      calculate();
-    }
+    if (selected.length === 5) calculate(); // auto-calc
   }
 
   function removeOne(id){
     document.getElementById('result').innerHTML = '';
     const idx = selected.indexOf(id);
     if (idx >= 0) selected.splice(idx, 1);
-    render();
-  }
-
-  function removeLast(){
-    document.getElementById('result').innerHTML = '';
-    selected.pop();
     render();
   }
 
@@ -345,8 +311,8 @@
     document.getElementById('countHint').textContent = `(${selected.length} / 5)`;
 
     const disableAdds = selected.length >= 5;
-
     const c = counts();
+
     for (const opt of OPTIONS){
       const btn = document.getElementById('btn_'+opt.id);
       btn.disabled = disableAdds;
@@ -392,41 +358,45 @@
     const best = evaluate(selected);
     const resultEl = document.getElementById('result');
 
-    // Rule 6: 五张鬼
-    if (best && best.special === 'FIVE_GHOST'){
-      resultEl.innerHTML = `
-        <div class="good"><b>Result:</b> 五张鬼</div>
-        <div class="muted" style="margin-top:6px;">All 5 cards are J/Q/K.</div>
-      `;
-      return;
-    }
-
     // 无牛
     if (!best){
       resultEl.innerHTML = `
-        <div class="bad"><b>Result:</b> 0 points (无牛)</div>
-        <div class="muted" style="margin-top:6px;">
-          No 3-card combination can form a multiple of 10 (after applying 3/6 flexibility).
+        <div class="bad"><b>Result:</b> 无牛</div>
+        <div style="margin-top:6px;">
+          <span class="tag">无牛... 😟</span>
         </div>
       `;
       return;
     }
 
-    // Result label rules (priority)
-    let resultLabel = '';
-    if (best.hasDongGu) {
-      resultLabel = '牛冬菇';
-    } else if (best.isPair) {
-      const rg = rankGroupOf(best.leftA); // same as leftB
-      resultLabel = `Pair ${rg}`;
-    } else {
-      if (best.points === 10) resultLabel = '牛牛 (10)';
-      else resultLabel = `牛 ${best.points}`;
+    // 五张鬼
+    if (best.isFiveGhost){
+      resultEl.innerHTML = `
+        <div class="good"><b>Result:</b> 五张鬼</div>
+        <div style="margin-top:6px;">
+          <span class="tag">🎉 五张鬼!!!!</span>
+        </div>
+      `;
+      return;
     }
 
+    // Result label by priority
+    let resultLabel = '';
+    if (best.isDongGu) {
+      resultLabel = '牛冬菇';
+    } else if (best.isPair) {
+      resultLabel = `Pair ${rankGroupOf(best.leftA)}`;
+    } else if (best.points === 10) {
+      resultLabel = '牛牛 (10)';
+    } else {
+      resultLabel = `牛 ${best.points}`;
+    }
+
+    // Tags
     const tags = [];
-    if (best.hasDongGu) tags.push(`<span class="tag">🎉 牛冬菇!!!!! (A♠ + J/Q/K)</span>`);
-    if (best.isPair) tags.push(`<span class="tag">🂡🂡 Pair cards!!!</span>`);
+    if (best.isDongGu) tags.push(`<span class="tag">🥳 牛冬菇!!!!!</span>`);
+    if (best.isPair) tags.push(`<span class="tag">🂡🂡 Pair Cards!!!</span>`);
+    if (!best.isDongGu && !best.isPair && best.points === 10) tags.push(`<span class="tag">牛牛!! (10)</span>`);
 
     const tripleExplain = best.tripleIdx.map((ix, t) => {
       const cid = selected[ix];
@@ -452,8 +422,7 @@
       </div>
 
       <div class="muted" style="margin-top:10px;">
-        3 & 6 can be treated as 3 or 6; calculator chooses the highest 点数 automatically.
-        ${best.preferAlloc ? '<br>Rule applied: When you have ≥3 ten-point cards, J/Q/K are preferred in 点数 and 10 is preferred in 牛.' : ''}
+        3 & 6 can be treated as 3 or 6; calculator chooses the best outcome automatically.
       </div>
     `;
   }
