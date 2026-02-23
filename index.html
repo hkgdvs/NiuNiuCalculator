@@ -117,8 +117,6 @@
     <div class="selectedBar" id="selectedBar"></div>
 
     <div class="row">
-      <button class="action primary" id="calcBtn" onclick="calculate()" disabled>Calculate</button>
-      <button class="action" onclick="removeLast()">Undo</button>
       <button class="action" onclick="resetAll()">Reset</button>
     </div>
 
@@ -314,8 +312,14 @@
   function addCard(id){
     document.getElementById('result').innerHTML = '';
     if (selected.length >= 5) return;
+
     selected.push(id);
     render();
+
+    // Auto-calculate as soon as we have exactly 5 cards
+    if (selected.length === 5) {
+      calculate();
+    }
   }
 
   function removeOne(id){
@@ -339,7 +343,6 @@
 
   function render(){
     document.getElementById('countHint').textContent = `(${selected.length} / 5)`;
-    document.getElementById('calcBtn').disabled = (selected.length !== 5);
 
     const disableAdds = selected.length >= 5;
 
