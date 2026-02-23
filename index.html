@@ -2,23 +2,13 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <!-- Prevent zooming (pinch/double-tap) -->
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Niu Niu</title>
 
   <link rel="manifest" href="manifest.webmanifest">
   <meta name="theme-color" content="#111111"/>
 
   <style>
-    /* Prevent iOS double-tap zoom while keeping taps responsive */
-    html, body {
-      touch-action: manipulation;
-      -webkit-text-size-adjust: 100%;
-    }
-    button, .card, .action {
-      touch-action: manipulation;
-    }
-
     body { font-family: -apple-system, system-ui, Arial; margin: 18px; }
     h2 { margin: 0 0 10px; }
     .box { border:1px solid #ddd; border-radius:16px; padding:14px; margin-top:12px; }
@@ -43,6 +33,7 @@
       cursor: pointer;
       user-select: none;
       -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
     }
     button.card:disabled {
       opacity: 0.45;
@@ -75,6 +66,7 @@
       border: 1px solid #ccc;
       background: #f7f7f7;
       cursor: pointer;
+      touch-action: manipulation;
     }
 
     .selectedBar {
@@ -92,6 +84,7 @@
       border:1px solid #ddd;
       background:#fafafa;
       font-size: 14px;
+      user-select: none;
     }
     .pill button {
       border:1px solid #ccc;
@@ -101,10 +94,10 @@
       cursor:pointer;
       font-size: 14px;
       line-height: 1;
+      touch-action: manipulation;
     }
 
     .tag { display:inline-block; padding:6px 10px; border-radius:999px; border:1px solid #ddd; margin:6px 6px 0 0; }
-    code { background:#f3f3f3; padding:2px 6px; border-radius:6px; }
   </style>
 </head>
 
@@ -119,7 +112,7 @@
     <div class="selectedBar" id="selectedBar"></div>
 
     <div class="row">
-      <button class="action" onclick="resetAll()">Reset</button>
+      <button class="action" id="resetBtn">Reset</button>
     </div>
 
     <div class="muted" style="margin-top:10px;">
@@ -131,21 +124,42 @@
     <div id="result"></div>
   </div>
 
+  <!-- Version shown BELOW the result box -->
+  <div id="versionBelow" class="muted" style="margin-top:8px; font-size:12px; color:#aaa;"></div>
+
 <script>
+  // ===== Version (change here only) =====
+  const APP_VERSION = "1.11";
+
   // Offline support
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('./sw.js').catch(()=>{});
   }
 
-  // Prevent iOS double-tap zoom (still allows fast repeated taps)
-  let lastTouchEnd = 0;
-  document.addEventListener('touchend', function (event) {
-    const now = Date.now();
-    if (now - lastTouchEnd <= 300) {
-      event.preventDefault();
-    }
-    lastTouchEnd = now;
-  }, { passive: false });
+  /**
+   * Tap handler:
+   * - uses touchend + preventDefault to reduce iOS double-tap zoom
+   * - still allows rapid repeated taps
+   * - avoids click firing after touch
+   */
+  let lastTouchAt = 0;
+  function addTapListener(el, fn) {
+    el.addEventListener('touchend', (e) => {
+      e.preventDefault();
+      lastTouchAt = Date.now();
+      fn(e);
+    }, { passive: false });
+
+    el.addEventListener('click', (e) => {
+      if (Date.now() - lastTouchAt < 650) return;
+      fn(e);
+    });
+  }
+
+  // Optional: block pinch/gesture zoom on iOS Safari
+  ['gesturestart','gesturechange','gestureend'].forEach(type => {
+    document.addEventListener(type, (e) => e.preventDefault(), { passive:false });
+  });
 
   // 14 options (A♠ behind K)
   const OPTIONS = [
@@ -160,7 +174,6 @@
   function findOpt(id){ return OPTIONS.find(o=>o.id===id); }
   function labelOf(id){ return findOpt(id)?.label ?? id; }
   function rankGroupOf(id){ return findOpt(id)?.rankGroup ?? id; }
-
   function isFaceJQK(id){ return id === 'J' || id === 'Q' || id === 'K'; }
 
   // 五张鬼: all 5 cards are J/Q/K
@@ -184,7 +197,7 @@
     return (mod === 0) ? 10 : mod;
   }
 
-  // best scoring for leftover 2 cards (auto choose best 3/6 assignment)
+  // best scoring for leftover 2 cards
   function bestLeftoverScore(cardA, cardB){
     const va = possibleValues(cardA);
     const vb = possibleValues(cardB);
@@ -359,7 +372,7 @@
       const minus = document.createElement('button');
       minus.textContent = '➖';
       minus.title = 'Remove one';
-      minus.addEventListener('click', () => removeOne(opt.id));
+      addTapListener(minus, () => removeOne(opt.id));
 
       pill.appendChild(minus);
       bar.appendChild(pill);
@@ -442,13 +455,19 @@
   }
 
   function init(){
+    // show version below result box
+    document.getElementById('versionBelow').textContent = `v${APP_VERSION}`;
+
+    // Reset button
+    addTapListener(document.getElementById('resetBtn'), resetAll);
+
+    // Card grid buttons
     const grid = document.getElementById('cardGrid');
     for (const opt of OPTIONS){
       const btn = document.createElement('button');
       btn.className = 'card';
       btn.id = 'btn_' + opt.id;
       btn.textContent = opt.label;
-      btn.addEventListener('click', () => addCard(opt.id));
 
       const badge = document.createElement('div');
       badge.className = 'badge';
@@ -456,8 +475,10 @@
       badge.style.display = 'none';
       btn.appendChild(badge);
 
+      addTapListener(btn, () => addCard(opt.id));
       grid.appendChild(btn);
     }
+
     render();
   }
 
